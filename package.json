@@ -1,0 +1,62 @@
+{
+  "name": "cocobod-workflow-system",
+  "version": "1.0.0",
+  "description": "COCOBOD Workflow & Document Approval System - Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run watch:css\" \"electron .\"",
+    "watch:css": "tailwindcss -i ./src/styles/input.css -o ./src/styles/output.css --watch",
+    "build:css": "tailwindcss -i ./src/styles/input.css -o ./src/styles/output.css --minify",
+    "build": "npm run build:css && electron-builder",
+    "build:win": "npm run build:css && electron-builder --win",
+    "pack": "electron-builder --dir",
+    "db:init": "node database/init.js",
+    "db:seed": "node database/seed.js"
+  },
+  "author": "COCOBOD",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "tailwindcss": "^3.4.0"
+  },
+  "dependencies": {
+    "pg": "^8.11.3",
+    "electron-store": "^8.1.0",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "build": {
+    "appId": "com.cocobod.workflow",
+    "productName": "COCOBOD Workflow System",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "database/**/*",
+      "assets/**/*",
+      ".env"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    }
+  }
+}

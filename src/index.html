@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+  <title>COCOBOD Workflow System</title>
+  <link rel="stylesheet" href="styles/output.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <!-- App Container -->
+  <div id="app">
+    <!-- Login Page -->
+    <div id="loginPage" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-800 via-green-700 to-emerald-600">
+      <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+        <!-- Logo and Title -->
+        <div class="text-center mb-8">
+          <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <i class="fas fa-cocoa text-4xl text-green-600"></i>
+          </div>
+          <h1 class="text-2xl font-bold text-gray-800">COCOBOD</h1>
+          <p class="text-gray-500 text-sm">Workflow & Document Approval System</p>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="space-y-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                <i class="fas fa-user"></i>
+              </span>
+              <input type="text" id="loginUsername" 
+                     class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+                     placeholder="Enter your username" required>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                <i class="fas fa-lock"></i>
+              </span>
+              <input type="password" id="loginPassword" 
+                     class="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+                     placeholder="Enter your password" required>
+              <button type="button" onclick="togglePassword()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <i class="fas fa-eye" id="passwordToggleIcon"></i>
+              </button>
+            </div>
+          </div>
+
+          <div id="loginError" class="hidden text-red-500 text-sm text-center bg-red-50 p-3 rounded-lg"></div>
+
+          <button type="submit" 
+                  class="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+            <span>Sign In</span>
+            <i class="fas fa-arrow-right"></i>
+          </button>
+        </form>
+
+        <!-- Demo Credentials -->
+        <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+          <p class="text-xs text-gray-500 text-center mb-2">Demo Credentials:</p>
+          <p class="text-xs text-gray-600 text-center">Username: <span class="font-mono bg-gray-200 px-1 rounded">admin</span> Password: <span class="font-mono bg-gray-200 px-1 rounded">admin123</span></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Application (Hidden until login) -->
+    <div id="mainApp" class="hidden min-h-screen flex flex-col">
+      <!-- Title Bar -->
+      <div class="title-bar bg-gray-900 h-10 flex items-center justify-between px-4 select-none">
+        <div class="flex items-center gap-3">
+          <div class="w-6 h-6 bg-green-500 rounded flex items-center justify-center">
+            <i class="fas fa-leaf text-white text-xs"></i>
+          </div>
+          <span class="text-gray-300 text-sm">COCOBOD Workflow System</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button onclick="window.electronAPI.minimizeWindow()" class="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white rounded transition-colors">
+            <i class="fas fa-minus text-xs"></i>
+          </button>
+          <button onclick="window.electronAPI.maximizeWindow()" class="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white rounded transition-colors">
+            <i class="fas fa-expand text-xs"></i>
+          </button>
+          <button onclick="window.electronAPI.closeWindow()" class="w-8 h-8 flex items-center justify-center text-gray-400 hover:bg-red-500 hover:text-white rounded transition-colors">
+            <i class="fas fa-times text-xs"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Content Area -->
+      <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 flex flex-col">
+          <!-- User Profile -->
+          <div class="p-4 border-b border-gray-200">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <i class="fas fa-user text-green-600"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p id="sidebarUserName" class="font-medium text-gray-800 truncate">Loading...</p>
+                <p id="sidebarUserRole" class="text-xs text-gray-500 capitalize">...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Navigation -->
+          <nav class="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
+            <a href="#" onclick="showPage('dashboard')" data-page="dashboard" class="sidebar-link active">
+              <i class="fas fa-home w-5 text-center mr-3"></i>
+              <span>Dashboard</span>
+            </a>
+
+            <a href="#" onclick="showPage('documents')" data-page="documents" class="sidebar-link" id="navDocuments">
+              <i class="fas fa-file-alt w-5 text-center mr-3"></i>
+              <span>Documents</span>
+            </a>
+
+            <a href="#" onclick="showPage('tasks')" data-page="tasks" class="sidebar-link" id="navTasks">
+              <i class="fas fa-tasks w-5 text-center mr-3"></i>
+              <span>Tasks</span>
+            </a>
+
+            <a href="#" onclick="showPage('approvals')" data-page="approvals" class="sidebar-link" id="navApprovals">
+              <i class="fas fa-check-circle w-5 text-center mr-3"></i>
+              <span>Approvals</span>
+            </a>
+
+            <a href="#" onclick="showPage('workflows')" data-page="workflows" class="sidebar-link admin-only" id="navWorkflows">
+              <i class="fas fa-project-diagram w-5 text-center mr-3"></i>
+              <span>Workflows</span>
+            </a>
+
+            <a href="#" onclick="showPage('departments')" data-page="departments" class="sidebar-link admin-only" id="navDepartments">
+              <i class="fas fa-building w-5 text-center mr-3"></i>
+              <span>Departments</span>
+            </a>
+
+            <a href="#" onclick="showPage('users')" data-page="users" class="sidebar-link admin-only" id="navUsers">
+              <i class="fas fa-users w-5 text-center mr-3"></i>
+              <span>Users</span>
+            </a>
+
+            <a href="#" onclick="showPage('activity')" data-page="activity" class="sidebar-link admin-only" id="navActivity">
+              <i class="fas fa-history w-5 text-center mr-3"></i>
+              <span>Activity Logs</span>
+            </a>
+
+            <a href="#" onclick="showPage('settings')" data-page="settings" class="sidebar-link">
+              <i class="fas fa-cog w-5 text-center mr-3"></i>
+              <span>Settings</span>
+            </a>
+          </nav>
+
+          <!-- Logout -->
+          <div class="p-4 border-t border-gray-200">
+            <button onclick="logout()" class="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+              <i class="fas fa-sign-out-alt"></i>
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+          <!-- Top Header -->
+          <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+            <div>
+              <h1 id="pageTitle" class="text-xl font-semibold text-gray-800">Dashboard</h1>
+              <p id="pageSubtitle" class="text-sm text-gray-500">Welcome back!</p>
+            </div>
+            <div class="flex items-center gap-4">
+              <!-- Notifications -->
+              <div class="relative">
+                <button onclick="toggleNotifications()" class="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                  <i class="fas fa-bell text-lg"></i>
+                  <span id="notificationBadge" class="hidden absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">0</span>
+                </button>
+                <div id="notificationDropdown" class="hidden absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                  <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="font-semibold text-gray-800">Notifications</h3>
+                    <button onclick="markAllNotificationsRead()" class="text-sm text-green-600 hover:text-green-700">Mark all read</button>
+                  </div>
+                  <div id="notificationList" class="max-h-64 overflow-y-auto">
+                    <!-- Notifications will be loaded here -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <!-- Page Content Container -->
+          <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+            
+            <!-- Dashboard Page -->
+            <div id="dashboardPage" class="page fade-in">
+              <!-- Stats Cards -->
+              <div id="dashboardStats" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                <!-- Stats will be loaded dynamically -->
+              </div>
+
+              <!-- Recent Activity -->
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Recent Documents -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="font-semibold text-gray-800">Recent Documents</h3>
+                    <a href="#" onclick="showPage('documents')" class="text-sm text-green-600 hover:text-green-700">View all</a>
+                  </div>
+                  <div id="recentDocuments" class="p-4">
+                    <!-- Recent documents will be loaded here -->
+                  </div>
+                </div>
+
+                <!-- Recent Tasks -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="font-semibold text-gray-800">Recent Tasks</h3>
+                    <a href="#" onclick="showPage('tasks')" class="text-sm text-green-600 hover:text-green-700">View all</a>
+                  </div>
+                  <div id="recentTasks" class="p-4">
+                    <!-- Recent tasks will be loaded here -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Documents Page -->
+            <div id="documentsPage" class="page hidden fade-in">
+              <!-- Action Bar -->
+              <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                <div class="flex items-center gap-3">
+                  <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                    <input type="text" id="documentSearch" placeholder="Search documents..." 
+                           class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 w-64"
+                           oninput="filterDocuments()">
+                  </div>
+                  <select id="documentStatusFilter" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" onchange="filterDocuments()">
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="in_review">In Review</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+                <button onclick="openUploadModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                  <i class="fas fa-upload"></i>
+                  <span>Upload Document</span>
+                </button>
+              </div>
+
+              <!-- Documents Table -->
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table class="w-full">
+                  <thead>
+                    <tr>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Title</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Department</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Status</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Priority</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Progress</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Created</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="documentsTableBody">
+                    <!-- Documents will be loaded here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Tasks Page -->
+            <div id="tasksPage" class="page hidden fade-in">
+              <!-- Action Bar -->
+              <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                <div class="flex items-center gap-3">
+                  <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                    <input type="text" id="taskSearch" placeholder="Search tasks..." 
+                           class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 w-64"
+                           oninput="filterTasks()">
+                  </div>
+                  <select id="taskStatusFilter" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" onchange="filterTasks()">
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+                <button onclick="openCreateTaskModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                  <i class="fas fa-plus"></i>
+                  <span>Create Task</span>
+                </button>
+              </div>
+
+              <!-- Tasks Grid -->
+              <div id="tasksContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Tasks will be loaded here -->
+              </div>
+            </div>
+
+            <!-- Approvals Page -->
+            <div id="approvalsPage" class="page hidden fade-in">
+              <div class="mb-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Documents Awaiting Your Approval</h2>
+              </div>
+
+              <!-- Approvals List -->
+              <div id="approvalsContainer" class="space-y-4">
+                <!-- Approvals will be loaded here -->
+              </div>
+            </div>
+
+            <!-- Workflows Page -->
+            <div id="workflowsPage" class="page hidden fade-in">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-semibold text-gray-800">Workflow Routes</h2>
+                <button onclick="openCreateWorkflowModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                  <i class="fas fa-plus"></i>
+                  <span>Create Workflow</span>
+                </button>
+              </div>
+
+              <!-- Workflows Grid -->
+              <div id="workflowsContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Workflows will be loaded here -->
+              </div>
+            </div>
+
+            <!-- Departments Page -->
+            <div id="departmentsPage" class="page hidden fade-in">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-semibold text-gray-800">Departments</h2>
+                <button onclick="openCreateDepartmentModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                  <i class="fas fa-plus"></i>
+                  <span>Add Department</span>
+                </button>
+              </div>
+
+              <!-- Departments Grid -->
+              <div id="departmentsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Departments will be loaded here -->
+              </div>
+            </div>
+
+            <!-- Users Page -->
+            <div id="usersPage" class="page hidden fade-in">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-semibold text-gray-800">User Management</h2>
+                <button onclick="openCreateUserModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                  <i class="fas fa-plus"></i>
+                  <span>Add User</span>
+                </button>
+              </div>
+
+              <!-- Users Table -->
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table class="w-full">
+                  <thead>
+                    <tr>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Name</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Username</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Email</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Role</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Department</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Status</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="usersTableBody">
+                    <!-- Users will be loaded here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Activity Logs Page -->
+            <div id="activityPage" class="page hidden fade-in">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-semibold text-gray-800">Activity Logs</h2>
+                <select id="activityFilter" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" onchange="loadActivityLogs()">
+                  <option value="">All Activities</option>
+                  <option value="login">Logins</option>
+                  <option value="create">Creates</option>
+                  <option value="update">Updates</option>
+                  <option value="delete">Deletes</option>
+                  <option value="upload">Uploads</option>
+                  <option value="approved">Approvals</option>
+                </select>
+              </div>
+
+              <!-- Activity Table -->
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table class="w-full">
+                  <thead>
+                    <tr>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">User</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Action</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Entity</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Details</th>
+                      <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50 border-b">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody id="activityTableBody">
+                    <!-- Activity logs will be loaded here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div id="settingsPage" class="page hidden fade-in">
+              <div class="max-w-2xl">
+                <!-- Profile Settings -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+                  <h3 class="text-lg font-semibold text-gray-800 mb-4">Profile Settings</h3>
+                  <form id="profileForm" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                        <input type="text" id="settingsFullName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                      </div>
+                      <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input type="email" id="settingsEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                      </div>
+                    </div>
+                    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+                      Update Profile
+                    </button>
+                  </form>
+                </div>
+
+                <!-- Change Password -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <h3 class="text-lg font-semibold text-gray-800 mb-4">Change Password</h3>
+                  <form id="passwordForm" class="space-y-4">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                      <input type="password" id="currentPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                      <input type="password" id="newPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                      <input type="password" id="confirmPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    </div>
+                    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+                      Change Password
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- Modals Container -->
+    <div id="modalsContainer">
+      <!-- Upload Document Modal -->
+      <div id="uploadModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Upload Document</h3>
+            <button onclick="closeModal('uploadModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <form id="uploadForm" class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+              <input type="text" id="uploadTitle" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea id="uploadDescription" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">File *</label>
+              <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-500 transition-colors cursor-pointer" onclick="selectFile()">
+                <input type="file" id="uploadFile" class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg">
+                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
+                <p class="text-gray-600" id="uploadFileName">Click to select file</p>
+                <p class="text-xs text-gray-400 mt-1">PDF, Word, Excel, Images</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                <select id="uploadDepartment" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="">Select Department</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Workflow Route</label>
+                <select id="uploadWorkflow" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="">Select Workflow</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                <select id="uploadPriority" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="low">Low</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <input type="date" id="uploadDeadline" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+              <button type="button" onclick="closeModal('uploadModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Upload</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create Task Modal -->
+      <div id="createTaskModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Create New Task</h3>
+            <button onclick="closeModal('createTaskModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <form id="createTaskForm" class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+              <input type="text" id="taskTitle" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea id="taskDescription" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Assign To *</label>
+                <select id="taskAssignee" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="">Select User</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                <select id="taskDepartment" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="">Select Department</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Related Document</label>
+              <select id="taskDocument" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                <option value="">Select Document (Optional)</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                <select id="taskPriority" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="low">Low</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <input type="date" id="taskDeadline" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+              <button type="button" onclick="closeModal('createTaskModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Create Task</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create Workflow Modal -->
+      <div id="createWorkflowModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Create Workflow Route</h3>
+            <button onclick="closeModal('createWorkflowModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <form id="createWorkflowForm" class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Workflow Name *</label>
+              <input type="text" id="workflowName" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea id="workflowDescription" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"></textarea>
+            </div>
+            
+            <!-- Workflow Stages -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-sm font-medium text-gray-700">Workflow Stages</label>
+                <button type="button" onclick="addWorkflowStage()" class="text-sm text-green-600 hover:text-green-700">
+                  <i class="fas fa-plus mr-1"></i>Add Stage
+                </button>
+              </div>
+              <div id="workflowStagesContainer" class="space-y-3">
+                <!-- Stages will be added dynamically -->
+              </div>
+            </div>
+            
+            <div class="flex justify-end gap-3 pt-4">
+              <button type="button" onclick="closeModal('createWorkflowModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Create Workflow</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create Department Modal -->
+      <div id="createDepartmentModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Add Department</h3>
+            <button onclick="closeModal('createDepartmentModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <form id="createDepartmentForm" class="p-6 space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Department Name *</label>
+              <input type="text" id="departmentName" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea id="departmentDescription" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Department Head</label>
+              <select id="departmentHead" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                <option value="">Select Head (Optional)</option>
+              </select>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+              <button type="button" onclick="closeModal('createDepartmentModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Add Department</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create User Modal -->
+      <div id="createUserModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Add User</h3>
+            <button onclick="closeModal('createUserModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <form id="createUserForm" class="p-6 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                <input type="text" id="newUserFullName" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Username *</label>
+                <input type="text" id="newUsername" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input type="email" id="newUserEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+              <input type="password" id="newUserPassword" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+                <select id="newUserRole" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="staff">Staff</option>
+                  <option value="hr">HR/Dept Admin</option>
+                  <option value="head">Head of Dept</option>
+                  <option value="admin">Administrator</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                <select id="newUserDepartment" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                  <option value="">Select Department</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 pt-4">
+              <button type="button" onclick="closeModal('createUserModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Add User</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Document Detail Modal -->
+      <div id="documentDetailModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800" id="documentDetailTitle">Document Details</h3>
+            <button onclick="closeModal('documentDetailModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div id="documentDetailContent" class="p-6">
+            <!-- Document details will be loaded here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Approval Modal -->
+      <div id="approvalModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800">Document Review</h3>
+            <button onclick="closeModal('approvalModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div id="approvalContent" class="p-6">
+            <!-- Approval content will be loaded here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Modal -->
+      <div id="chatModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 h-[600px] flex flex-col">
+          <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="font-semibold text-gray-800" id="chatTitle">Chat</h3>
+            <button onclick="closeModal('chatModal')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-3">
+            <!-- Messages will be loaded here -->
+          </div>
+          <div class="p-4 border-t border-gray-200">
+            <form id="chatForm" class="flex gap-2">
+              <input type="text" id="chatInput" placeholder="Type a message..." 
+                     class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500">
+              <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                <i class="fas fa-paper-plane"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast Notification -->
+      <div id="toast" class="hidden fixed bottom-4 right-4 bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-3">
+        <i id="toastIcon" class="fas fa-check-circle text-green-400"></i>
+        <span id="toastMessage">Action completed successfully</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

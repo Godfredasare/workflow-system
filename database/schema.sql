@@ -288,7 +288,7 @@ SELECT
     d.status,
     d.current_stage,
     COUNT(ws.id) as total_stages,
-    ROUND((d.current_stage::float / NULLIF(COUNT(ws.id), 0)) * 100, 0) as progress_percentage
+    ROUND(CAST(d.current_stage AS numeric) / NULLIF(COUNT(ws.id), 0) * 100, 0) as progress_percentage
 FROM documents d
 LEFT JOIN workflow_stages ws ON ws.route_id = d.workflow_route_id
 GROUP BY d.id, d.title, d.status, d.current_stage;

@@ -1478,41 +1478,51 @@ ipcMain.handle('dialog:openFile', async () => {
 // Helper Functions
 // =====================================================
 
-function logActivity(userId, action, entityType, entityId, details) {
+async function logActivity(userId, action, entityType, entityId, details) {
   const id = uuidv4();
   const client = db.getClient();
   
-  client
-    .from('activity_logs')
-    .insert({
-      id,
-      user_id: userId,
-      action,
-      entity_type: entityType,
-      entity_id: entityId,
-      details
-    })
-    .catch(err => {
-      console.error('Error logging activity:', err);
-    });
+  try {
+    const { error } = await client
+      .from('activity_logs')
+      .insert({
+        id,
+        user_id: userId,
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        details
+      });
+    
+    if (error) {
+      console.error('Error logging activity:', error);
+    }
+  } catch (err) {
+    console.error('Error logging activity:', err);
+  }
 }
 
-function createNotification(userId, type, title, message, entityType, entityId) {
+async function createNotification(userId, type, title, message, entityType, entityId) {
   const id = uuidv4();
   const client = db.getClient();
   
-  client
-    .from('notifications')
-    .insert({
-      id,
-      user_id: userId,
-      type,
-      title,
-      message,
-      entity_type: entityType,
-      entity_id: entityId
-    })
-    .catch(err => {
-      console.error('Error creating notification:', err);
-    });
+  try {
+    const { error } = await client
+      .from('notifications')
+      .insert({
+        id,
+        user_id: userId,
+        type,
+        title,
+        message,
+        entity_type: entityType,
+        entity_id: entityId
+      });
+    
+    if (error) {
+      console.error('Error creating notification:', error);
+    }
+  } catch (err) {
+    console.error('Error creating notification:', err);
+  }
 }

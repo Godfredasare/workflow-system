@@ -342,17 +342,17 @@ INSERT INTO tasks (id, title, description, assigned_to, assigned_by, department_
 
 -- Insert Activity Logs
 INSERT INTO activity_logs (id, user_id, action, entity_type, entity_id, details, created_at) VALUES
-    ('g0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'login', 'user', 'b0000000-0000-0000-0000-000000000001', 'User logged into the system', NOW() - INTERVAL '1 hour'),
-    ('g0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', 'create', 'document', 'd0000000-0000-0000-0000-000000000001', 'Created document: Cocoa Purchasing Agreement 2024', NOW() - INTERVAL '5 days'),
-    ('g0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000005', 'create', 'document', 'd0000000-0000-0000-0000-000000000002', 'Created document: Q1 Financial Report', NOW() - INTERVAL '3 days'),
-    ('g0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000002', 'create', 'task', 'e0000000-0000-0000-0000-000000000001', 'Created task: Review Cocoa Purchasing Agreement', NOW() - INTERVAL '2 days'),
-    ('g0000000-0000-0000-0000-000000000005', 'b0000000-0000-0000-0000-000000000005', 'status_change', 'task', 'e0000000-0000-0000-0000-000000000002', 'Task status changed to in_progress', NOW() - INTERVAL '1 day');
+    ('a1000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'login', 'user', 'b0000000-0000-0000-0000-000000000001', 'User logged into the system', NOW() - INTERVAL '1 hour'),
+    ('a1000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', 'create', 'document', 'd0000000-0000-0000-0000-000000000001', 'Created document: Cocoa Purchasing Agreement 2024', NOW() - INTERVAL '5 days'),
+    ('a1000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000005', 'create', 'document', 'd0000000-0000-0000-0000-000000000002', 'Created document: Q1 Financial Report', NOW() - INTERVAL '3 days'),
+    ('a1000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000002', 'create', 'task', 'e0000000-0000-0000-0000-000000000001', 'Created task: Review Cocoa Purchasing Agreement', NOW() - INTERVAL '2 days'),
+    ('a1000000-0000-0000-0000-000000000005', 'b0000000-0000-0000-0000-000000000005', 'status_change', 'task', 'e0000000-0000-0000-0000-000000000002', 'Task status changed to in_progress', NOW() - INTERVAL '1 day');
 
 -- Insert Notifications
 INSERT INTO notifications (id, user_id, type, title, message, entity_type, entity_id, is_read, created_at) VALUES
-    ('h0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000004', 'task_assigned', 'New Task Assigned', 'You have been assigned a new task: Review Cocoa Purchasing Agreement', 'task', 'e0000000-0000-0000-0000-000000000001', FALSE, NOW() - INTERVAL '2 days'),
-    ('h0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000006', 'document_pending', 'Document Requires Review', 'Document Q1 Financial Report requires your review', 'document', 'd0000000-0000-0000-0000-000000000002', TRUE, NOW() - INTERVAL '3 days'),
-    ('h0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000005', 'deadline_reminder', 'Deadline Approaching', 'Task "Verify Financial Calculations" deadline is approaching', 'task', 'e0000000-0000-0000-0000-000000000002', FALSE, NOW());
+    ('a2000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000004', 'task_assigned', 'New Task Assigned', 'You have been assigned a new task: Review Cocoa Purchasing Agreement', 'task', 'e0000000-0000-0000-0000-000000000001', FALSE, NOW() - INTERVAL '2 days'),
+    ('a2000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000006', 'document_pending', 'Document Requires Review', 'Document Q1 Financial Report requires your review', 'document', 'd0000000-0000-0000-0000-000000000002', TRUE, NOW() - INTERVAL '3 days'),
+    ('a2000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000005', 'deadline_reminder', 'Deadline Approaching', 'Task "Verify Financial Calculations" deadline is approaching', 'task', 'e0000000-0000-0000-0000-000000000002', FALSE, NOW());
 
 -- =====================================================
 -- SETUP COMPLETE!

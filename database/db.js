@@ -1,206 +1,295 @@
 require('dotenv').config();
-const { Pool, Client } = require('pg');
+const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
 
-// Database configuration
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'cocobod_workflow',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-};
+// Supabase configuration
+const supabaseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'your-anon-key';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || supabaseKey;
 
-// Admin config (connects to 'postgres' database for admin operations)
-const adminConfig = {
-  ...dbConfig,
-  database: 'postgres',
-};
+// Create Supabase client
+let supabase = null;
 
-// Create connection pool
-let pool = null;
-
-function getPool() {
-  if (!pool) {
-    pool = new Pool(dbConfig);
-    pool.on('error', (err, client) => {
-      console.error('Unexpected error on idle client', err);
+function getClient() {
+  if (!supabase) {
+    supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     });
   }
-  return pool;
+  return supabase;
 }
 
-// Query helper function
-async function query(text, params = []) {
-  const start = Date.now();
-  const result = await getPool().query(text, params);
-  const duration = Date.now() - start;
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`Query executed in ${duration}ms: ${text.substring(0, 100)}...`);
+// Query helper function using RPC or direct table queries
+async function query(table, options = {}) {
+  const client = getClient();
+  let query = client.from(table).select(options.select || '*', { count: options.count });
+
+  if (options.filter) {
+    for (const [key, value] of Object.entries(options.filter)) {
+      if (value !== undefined && value !== null) {
+        query = query.eq(key, value);
+      }
+    }
   }
+
+  if (options.order) {
+    query = query.order(options.order.column, { ascending: options.order.ascending ?? false });
+  }
+
+  if (options.limit) {
+    query = query.limit(options.limit);
+  }
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return { rows: data, count };
+}
+
+// Raw SQL query using RPC (requires a function in Supabase)
+async function rpc(functionName, params = {}) {
+  const client = getClient();
+  const { data, error } = await client.rpc(functionName, params);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+// Insert into table
+async function insert(table, data) {
+  const client = getClient();
+  const { data: result, error } = await client
+    .from(table)
+    .insert(data)
+    .select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
   return result;
 }
 
-// Get single row
-async function queryOne(text, params = []) {
-  const result = await query(text, params);
-  return result.rows[0] || null;
-}
+// Update table
+async function update(table, data, filter) {
+  const client = getClient();
+  let query = client.from(table).update(data);
 
-// Get all rows
-async function queryAll(text, params = []) {
-  const result = await query(text, params);
-  return result.rows;
-}
-
-// Execute raw SQL
-async function executeSQL(sql) {
-  await getPool().query(sql);
-}
-
-// Initialize database schema
-async function initializeDatabase() {
-  console.log('Initializing database schema...');
-  
-  const client = await getPool().connect();
-  try {
-    // Read schema file
-    const schemaPath = path.join(__dirname, 'schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    
-    // Execute schema
-    await client.query(schema);
-    console.log('Database schema initialized');
-    
-    return true;
-  } catch (error) {
-    console.error('Error initializing schema:', error);
-    throw error;
-  } finally {
-    client.release();
+  for (const [key, value] of Object.entries(filter)) {
+    query = query.eq(key, value);
   }
+
+  const { data: result, error } = await query.select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return result;
 }
 
-// Check database connection
-async function checkConnection() {
-  try {
-    const result = await queryOne('SELECT NOW() as now');
-    console.log('Database connected:', result.now);
-    return true;
-  } catch (error) {
-    console.error('Database connection error:', error.message);
-    return false;
-  }
-}
+// Delete from table
+async function deleteRecord(table, filter) {
+  const client = getClient();
+  let query = client.from(table).delete();
 
-// Create database if it doesn't exist
-async function createDatabase() {
-  const dbName = dbConfig.database;
-  const client = new Client(adminConfig);
-  
-  try {
-    await client.connect();
-    console.log('Connected to PostgreSQL server');
-    
-    // Check if database exists
-    const result = await client.query(
-      'SELECT 1 FROM pg_database WHERE datname = $1',
-      [dbName]
-    );
-    
-    if (result.rows.length === 0) {
-      // Create database
-      await client.query(`CREATE DATABASE "${dbName}"`);
-      console.log(`Database '${dbName}' created successfully`);
-    } else {
-      console.log(`Database '${dbName}' already exists`);
-    }
-    
-    await client.end();
-    return true;
-  } catch (error) {
-    console.error('Error creating database:', error.message);
-    try {
-      await client.end();
-    } catch (e) {}
-    return false;
+  for (const [key, value] of Object.entries(filter)) {
+    query = query.eq(key, value);
   }
-}
 
-// Close pool
-async function closePool() {
-  if (pool) {
-    await pool.end();
-    pool = null;
-    console.log('Database pool closed');
-  }
-}
+  const { error } = await query;
 
-// Transaction helper
-async function transaction(callback) {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback({
-      query: (text, params) => client.query(text, params),
-      queryOne: async (text, params) => {
-        const res = await client.query(text, params);
-        return res.rows[0] || null;
-      },
-      queryAll: async (text, params) => {
-        const res = await client.query(text, params);
-        return res.rows;
-      }
-    });
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+  if (error) {
+    throw new Error(error.message);
   }
-}
 
-// Full setup: create database, schema, and seed
-async function setup() {
-  console.log('Starting full database setup...');
-  
-  // Step 1: Create database
-  const dbCreated = await createDatabase();
-  if (!dbCreated) {
-    throw new Error('Failed to create database');
-  }
-  
-  // Step 2: Initialize schema
-  const schemaInit = await initializeDatabase();
-  if (!schemaInit) {
-    throw new Error('Failed to initialize schema');
-  }
-  
-  // Step 3: Seed data
-  const { seedDatabase } = require('./seed');
-  await seedDatabase();
-  
-  console.log('Database setup completed!');
   return true;
 }
 
+// Get single row
+async function queryOne(table, options = {}) {
+  const client = getClient();
+  let query = client.from(table).select(options.select || '*').limit(1);
+
+  if (options.filter) {
+    for (const [key, value] of Object.entries(options.filter)) {
+      if (value !== undefined && value !== null) {
+        query = query.eq(key, value);
+      }
+    }
+  }
+
+  if (options.order) {
+    query = query.order(options.order.column, { ascending: options.order.ascending ?? false });
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+// Get all rows
+async function queryAll(table, options = {}) {
+  const client = getClient();
+  let query = client.from(table).select(options.select || '*');
+
+  if (options.filter) {
+    for (const [key, value] of Object.entries(options.filter)) {
+      if (value !== undefined && value !== null) {
+        query = query.eq(key, value);
+      }
+    }
+  }
+
+  if (options.order) {
+    query = query.order(options.order.column, { ascending: options.order.ascending ?? false });
+  }
+
+  if (options.limit) {
+    query = query.limit(options.limit);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data || [];
+}
+
+// Raw query for complex SQL (stored procedures must exist in Supabase)
+async function rawQuery(sql, params = []) {
+  // For complex queries, use stored procedures in Supabase
+  // or use the REST API with filters
+  console.warn('Raw SQL queries require stored procedures in Supabase');
+  throw new Error('Use stored procedures or table methods for Supabase queries');
+}
+
+// Check connection
+async function checkConnection() {
+  try {
+    const client = getClient();
+    const { data, error } = await client.from('users').select('id').limit(1);
+    if (error && !error.message.includes('does not exist')) {
+      console.error('Supabase connection error:', error.message);
+      return false;
+    }
+    console.log('Supabase connected successfully');
+    return true;
+  } catch (error) {
+    console.error('Supabase connection error:', error.message);
+    return false;
+  }
+}
+
+// Initialize database schema (runs SQL file via Supabase SQL Editor or migration)
+async function initializeDatabase() {
+  console.log('Database initialization should be done via Supabase dashboard or migrations');
+  console.log('Please run the schema.sql file in the Supabase SQL Editor');
+  return true;
+}
+
+// Close connection (Supabase client doesn't need explicit closing)
+async function closePool() {
+  supabase = null;
+  console.log('Supabase client reset');
+}
+
+// Transaction support via Supabase (requires stored procedure)
+async function transaction(callback) {
+  // Supabase handles transactions via stored procedures
+  // For complex transactions, create a stored procedure in Supabase
+  console.warn('Transactions in Supabase require stored procedures');
+  throw new Error('Use stored procedures for Supabase transactions');
+}
+
+// Storage functions for file uploads
+async function uploadFile(bucket, path, file, options = {}) {
+  const client = getClient();
+  const { data, error } = await client.storage
+    .from(bucket)
+    .upload(path, file, options);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function downloadFile(bucket, path) {
+  const client = getClient();
+  const { data, error } = await client.storage
+    .from(bucket)
+    .download(path);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function getPublicUrl(bucket, path) {
+  const client = getClient();
+  const { data } = client.storage
+    .from(bucket)
+    .getPublicUrl(path);
+
+  return data.publicUrl;
+}
+
+// Real-time subscription helper
+function subscribe(table, callback, filter = null) {
+  const client = getClient();
+  let channel = client.channel(`${table}_changes`);
+
+  channel = channel.on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: table,
+      filter: filter
+    },
+    callback
+  );
+
+  channel.subscribe();
+  return channel;
+}
+
 module.exports = {
-  getPool,
+  getClient,
   query,
   queryOne,
   queryAll,
-  executeSQL,
-  initializeDatabase,
+  insert,
+  update,
+  delete: deleteRecord,
+  rpc,
+  rawQuery,
   checkConnection,
-  createDatabase,
+  initializeDatabase,
   closePool,
   transaction,
-  setup,
-  dbConfig
+  uploadFile,
+  downloadFile,
+  getPublicUrl,
+  subscribe
 };

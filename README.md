@@ -18,8 +18,7 @@ A desktop application for managing internal document processing, task assignment
 | Component | Technology |
 |-----------|------------|
 | Desktop Framework | Electron |
-| Database | PostgreSQL |
-| Backend | Node.js |
+| Backend | Supabase (PostgreSQL) |
 | Frontend | HTML/CSS/JavaScript |
 | Styling | Tailwind CSS |
 | Icons | Font Awesome |
@@ -31,73 +30,63 @@ A desktop application for managing internal document processing, task assignment
 1. **Node.js** (v18 or higher)
    - Download from: https://nodejs.org/
 
-2. **PostgreSQL** (v14 or higher)
-   - Download from: https://www.postgresql.org/download/
-   - Make sure PostgreSQL service is running
+2. **Supabase Account** (Free tier available)
+   - Sign up at: https://supabase.com/
 
 3. **npm** (comes with Node.js)
 
 ## Installation
 
-### Step 1: Install PostgreSQL
+### Step 1: Create a Supabase Project
 
-**Windows:**
-1. Download PostgreSQL installer from https://www.postgresql.org/download/windows/
-2. Run the installer and follow the setup wizard
-3. Remember the password you set for the `postgres` user
-4. Default port: 5432
+1. Go to [Supabase](https://supabase.com/) and sign in
+2. Create a new project
+3. Note down your project URL and API keys from **Settings > API**
 
-**Verify PostgreSQL is running:**
-```bash
-# Windows (PowerShell)
-pg_isready
+### Step 2: Set Up Database Schema
 
-# Or connect via psql
-psql -U postgres
-```
+1. Go to **SQL Editor** in your Supabase dashboard
+2. Copy the contents of `database/schema.sql` from this project
+3. Run the SQL to create all tables, views, and indexes
 
-### Step 2: Configure Environment
+### Step 3: Seed Demo Data (Optional)
+
+1. In the Supabase SQL Editor
+2. Copy the contents of `database/seed.sql` (or run `database/seed.js` locally)
+3. Run the SQL to populate demo data
+
+### Step 4: Configure Environment
 
 1. Copy the example environment file:
    ```bash
    copy .env.example .env
    ```
 
-2. Edit `.env` with your PostgreSQL credentials:
+2. Edit `.env` with your Supabase credentials:
    ```env
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=cocobod_workflow
-   DB_USER=postgres
-   DB_PASSWORD=your_postgres_password
+   SUPABASE_URL=https://your-project-id.supabase.co
+   SUPABASE_ANON_KEY=your-anon-key-here
+   SUPABASE_SERVICE_KEY=your-service-role-key-here
    ```
 
-### Step 3: Install Dependencies
+   You can find these values in Supabase Dashboard > Settings > API:
+   - **URL** → `SUPABASE_URL`
+   - **anon public** → `SUPABASE_ANON_KEY`
+   - **service_role** → `SUPABASE_SERVICE_KEY`
+
+### Step 5: Install Dependencies
 
 ```bash
 npm install
 ```
 
-### Step 4: Initialize Database
-
-The database will be automatically initialized on first run, or you can manually initialize:
-
-```bash
-npm run db:init
-```
-
-This will:
-- Create the `cocobod_workflow` database (if not exists)
-- Create all required tables
-- Seed demo data
-
-### Step 5: Build CSS
+### Step 6: Build CSS
 
 ```bash
 npm run build:css
 ```
 
-### Step 6: Start the Application
+### Step 7: Start the Application
 
 ```bash
 npm start
@@ -166,6 +155,32 @@ users ──────────┬─── departments
 workflow_routes ──── workflow_stages
 ```
 
+## Supabase Configuration
+
+### Row Level Security (RLS)
+
+For production, enable RLS on all tables. Example policies:
+
+```sql
+-- Users can only see their own data (unless admin)
+CREATE POLICY "Users can view own data"
+ON users FOR SELECT
+USING (auth.uid()::text = id OR auth.jwt() ->> 'role' = 'admin');
+
+-- Staff can only see tasks assigned to them
+CREATE POLICY "Users can view assigned tasks"
+ON tasks FOR SELECT
+USING (assigned_to = auth.uid()::text OR assigned_by = auth.uid()::text);
+```
+
+### Storage Buckets (Optional)
+
+For document storage, create a bucket in Supabase Storage:
+
+1. Go to Storage in Supabase dashboard
+2. Create a bucket named `documents`
+3. Configure access policies
+
 ## Building for Windows
 
 ### Development Build
@@ -198,7 +213,7 @@ cocobod-workflow-system/
 │   ├── icon.png          # Application icon (PNG)
 │   └── icon.ico          # Application icon (Windows)
 ├── database/
-│   ├── db.js             # Database connection module
+│   ├── db.js             # Supabase client module
 │   ├── schema.sql        # PostgreSQL schema
 │   ├── seed.js           # Demo data seeder
 │   └── init.js           # Database initialization
@@ -229,62 +244,29 @@ npm run dev
 
 This runs both the Tailwind CSS watcher and Electron simultaneously.
 
-### Database Commands
-
-```bash
-# Initialize database
-npm run db:init
-
-# Seed demo data only
-npm run db:seed
-```
-
-### Useful SQL Queries
-
-```sql
--- View all users
-SELECT id, username, full_name, role, is_active FROM users;
-
--- View document workflow progress
-SELECT * FROM v_document_progress;
-
--- View user task summary
-SELECT * FROM v_user_task_summary;
-
--- Check pending approvals
-SELECT d.title, d.status, d.current_stage 
-FROM documents d 
-WHERE d.status IN ('pending', 'in_review');
-```
-
 ## Troubleshooting
 
 ### Application won't start
 
-1. **Check PostgreSQL is running:**
-   ```bash
-   pg_isready
-   ```
+1. **Check Supabase credentials in `.env`**
 
-2. **Verify database credentials in `.env`**
+2. **Verify Supabase project is running:**
+   - Go to your Supabase dashboard
+   - Ensure project status is "Active"
 
 3. **Check Node.js version:**
    ```bash
    node --version  # Should be v18+
    ```
 
-### Database connection errors
+### Connection errors
 
-1. **Verify PostgreSQL service:**
-   - Windows: Open Services, find 'postgresql-x64-14' (or similar), ensure it's running
+1. **Verify API keys:**
+   - Go to Supabase Dashboard > Settings > API
+   - Ensure URL and keys are correct in `.env`
 
-2. **Test connection manually:**
-   ```bash
-   psql -U postgres -h localhost
-   ```
-
-3. **Check firewall settings:**
-   - Ensure port 5432 is not blocked
+2. **Check network connectivity:**
+   - Ensure you can reach `https://your-project.supabase.co`
 
 ### Build errors
 
@@ -301,19 +283,13 @@ WHERE d.status IN ('pending', 'in_review');
 
 ### Reset database
 
-```sql
--- Connect as superuser
-psql -U postgres
-
--- Drop and recreate database
-DROP DATABASE cocobod_workflow;
-CREATE DATABASE cocobod_workflow;
-```
-
-Then run:
-```bash
-npm run db:init
-```
+1. Go to Supabase SQL Editor
+2. Run:
+   ```sql
+   DROP SCHEMA public CASCADE;
+   CREATE SCHEMA public;
+   ```
+3. Re-run the schema.sql
 
 ## Security Notes
 
@@ -323,10 +299,10 @@ npm run db:init
    - Implement bcrypt or argon2 password hashing
    - Never store plain text passwords
 
-2. **Database Security**:
-   - Use strong PostgreSQL passwords
-   - Create a dedicated application user with limited permissions
-   - Enable SSL for database connections in production
+2. **Supabase Security**:
+   - Enable Row Level Security (RLS) on all tables
+   - Use anon key for client-side, service_role key only on server
+   - Review security policies regularly
 
 3. **Session Management**:
    - Implement session timeout

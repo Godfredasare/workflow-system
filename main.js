@@ -21,40 +21,18 @@ let dbInitialized = false;
 // =====================================================
 
 async function initDatabase() {
-  console.log('Initializing database connection...');
+  console.log('Initializing Supabase connection...');
   
   try {
     db = require('./database/db');
-    
-    // Check if we need to setup database
-    const needsSetup = store.get('needsDbSetup', true);
-    
-    if (needsSetup) {
-      console.log('First run - setting up database...');
-      
-      // Try to create database and initialize
-      try {
-        await db.createDatabase();
-        await db.initializeDatabase();
-        
-        // Seed demo data
-        const { seedDatabase } = require('./database/seed');
-        await seedDatabase();
-        
-        store.set('needsDbSetup', false);
-        console.log('Database setup complete');
-      } catch (setupError) {
-        console.error('Database setup error:', setupError.message);
-        console.log('Attempting to connect anyway...');
-      }
-    }
     
     // Test connection
     const connected = await db.checkConnection();
     dbInitialized = connected;
     
     if (!connected) {
-      console.error('Could not connect to database');
+      console.error('Could not connect to Supabase');
+      console.log('Please check your SUPABASE_URL and SUPABASE_ANON_KEY in .env file');
     }
     
     return connected;
@@ -191,15 +169,27 @@ ipcMain.on('window-close', () => mainWindow?.close());
 
 ipcMain.handle('auth:login', async (event, { username, password }) => {
   try {
-    const user = await db.queryOne(`
-      SELECT id, username, full_name, email, role, department_id, is_active
-      FROM users 
-      WHERE username = $1 AND password = $2 AND is_active = TRUE
-    `, [username, password]);
+    const client = db.getClient();
+    
+    // Query user with credentials
+    const { data: user, error } = await client
+      .from('users')
+      .select('id, username, full_name, email, role, department_id, is_active')
+      .eq('username', username)
+      .eq('password', password)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     if (user) {
       // Update last login
-      await db.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
+      await client
+        .from('users')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', user.id);
       
       // Log activity
       logActivity(user.id, 'login', 'user', user.id, 'User logged in');
@@ -207,7 +197,12 @@ ipcMain.handle('auth:login', async (event, { username, password }) => {
       // Get department name if assigned
       let department = null;
       if (user.department_id) {
-        department = await db.queryOne('SELECT id, name FROM departments WHERE id = $1', [user.department_id]);
+        const { data: dept } = await client
+          .from('departments')
+          .select('id, name')
+          .eq('id', user.department_id)
+          .single();
+        department = dept;
       }
 
       return { success: true, user: { ...user, department } };
@@ -230,14 +225,26 @@ ipcMain.handle('auth:logout', async (event, userId) => {
 
 ipcMain.handle('users:getAll', async () => {
   try {
-    const users = await db.queryAll(`
-      SELECT u.id, u.username, u.full_name, u.email, u.role, u.department_id, u.is_active, u.created_at,
-             d.name as department_name
-      FROM users u
-      LEFT JOIN departments d ON u.department_id = d.id
-      ORDER BY u.created_at DESC
-    `);
-    return { success: true, users };
+    const client = db.getClient();
+    const { data: users, error } = await client
+      .from('users')
+      .select(`
+        id, username, full_name, email, role, department_id, is_active, created_at,
+        departments ( name )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    // Transform data to match expected format
+    const transformedUsers = users.map(u => ({
+      ...u,
+      department_name: u.departments?.name || null
+    }));
+
+    return { success: true, users: transformedUsers };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -246,10 +253,23 @@ ipcMain.handle('users:getAll', async () => {
 ipcMain.handle('users:create', async (event, userData) => {
   try {
     const id = uuidv4();
-    await db.query(`
-      INSERT INTO users (id, username, password, full_name, email, role, department_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [id, userData.username, userData.password, userData.full_name, userData.email, userData.role, userData.department_id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('users')
+      .insert({
+        id,
+        username: userData.username,
+        password: userData.password,
+        full_name: userData.full_name,
+        email: userData.email,
+        role: userData.role,
+        department_id: userData.department_id
+      });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
     
     logActivity(userData.createdBy, 'create', 'user', id, `Created user: ${userData.username}`);
     return { success: true, id };
@@ -260,19 +280,16 @@ ipcMain.handle('users:create', async (event, userData) => {
 
 ipcMain.handle('users:update', async (event, { id, data, updatedBy }) => {
   try {
-    const setClauses = [];
-    const values = [];
-    let paramCount = 1;
+    const client = db.getClient();
     
-    if (data.full_name) { setClauses.push(`full_name = $${paramCount++}`); values.push(data.full_name); }
-    if (data.email) { setClauses.push(`email = $${paramCount++}`); values.push(data.email); }
-    if (data.role) { setClauses.push(`role = $${paramCount++}`); values.push(data.role); }
-    if (data.department_id !== undefined) { setClauses.push(`department_id = $${paramCount++}`); values.push(data.department_id); }
-    if (data.is_active !== undefined) { setClauses.push(`is_active = $${paramCount++}`); values.push(data.is_active); }
-    if (data.password) { setClauses.push(`password = $${paramCount++}`); values.push(data.password); }
+    const { error } = await client
+      .from('users')
+      .update(data)
+      .eq('id', id);
 
-    values.push(id);
-    await db.query(`UPDATE users SET ${setClauses.join(', ')} WHERE id = $${paramCount}`, values);
+    if (error) {
+      return { success: false, message: error.message };
+    }
     
     logActivity(updatedBy, 'update', 'user', id, 'Updated user profile');
     return { success: true };
@@ -283,7 +300,17 @@ ipcMain.handle('users:update', async (event, { id, data, updatedBy }) => {
 
 ipcMain.handle('users:delete', async (event, { id, deletedBy }) => {
   try {
-    await db.query('UPDATE users SET is_active = FALSE WHERE id = $1', [id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('users')
+      .update({ is_active: false })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    
     logActivity(deletedBy, 'delete', 'user', id, 'Deactivated user');
     return { success: true };
   } catch (error) {
@@ -297,15 +324,31 @@ ipcMain.handle('users:delete', async (event, { id, deletedBy }) => {
 
 ipcMain.handle('departments:getAll', async () => {
   try {
-    const departments = await db.queryAll(`
-      SELECT d.id, d.name, d.description, d.created_at,
-             u.full_name as head_name,
-             (SELECT COUNT(*) FROM users WHERE department_id = d.id AND is_active = TRUE) as staff_count
-      FROM departments d
-      LEFT JOIN users u ON d.head_id = u.id
-      ORDER BY d.name
-    `);
-    return { success: true, departments };
+    const client = db.getClient();
+    
+    // Get departments with staff count
+    const { data: departments, error } = await client
+      .from('departments')
+      .select(`
+        id, name, description, created_at,
+        users ( id )
+      `)
+      .order('name');
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    // Transform to include staff count
+    const transformed = departments.map(d => ({
+      id: d.id,
+      name: d.name,
+      description: d.description,
+      created_at: d.created_at,
+      staff_count: d.users?.length || 0
+    }));
+
+    return { success: true, departments: transformed };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -314,10 +357,20 @@ ipcMain.handle('departments:getAll', async () => {
 ipcMain.handle('departments:create', async (event, { data, createdBy }) => {
   try {
     const id = uuidv4();
-    await db.query(`
-      INSERT INTO departments (id, name, description, head_id)
-      VALUES ($1, $2, $3, $4)
-    `, [id, data.name, data.description, data.head_id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('departments')
+      .insert({
+        id,
+        name: data.name,
+        description: data.description,
+        head_id: data.head_id
+      });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
     
     logActivity(createdBy, 'create', 'department', id, `Created department: ${data.name}`);
     return { success: true, id };
@@ -328,9 +381,20 @@ ipcMain.handle('departments:create', async (event, { data, createdBy }) => {
 
 ipcMain.handle('departments:update', async (event, { id, data, updatedBy }) => {
   try {
-    await db.query(`
-      UPDATE departments SET name = $1, description = $2, head_id = $3 WHERE id = $4
-    `, [data.name, data.description, data.head_id, id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('departments')
+      .update({
+        name: data.name,
+        description: data.description,
+        head_id: data.head_id
+      })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
     
     logActivity(updatedBy, 'update', 'department', id, 'Updated department');
     return { success: true };
@@ -341,7 +405,17 @@ ipcMain.handle('departments:update', async (event, { id, data, updatedBy }) => {
 
 ipcMain.handle('departments:delete', async (event, { id, deletedBy }) => {
   try {
-    await db.query('DELETE FROM departments WHERE id = $1', [id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('departments')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    
     logActivity(deletedBy, 'delete', 'department', id, 'Deleted department');
     return { success: true };
   } catch (error) {
@@ -355,15 +429,30 @@ ipcMain.handle('departments:delete', async (event, { id, deletedBy }) => {
 
 ipcMain.handle('workflows:getAll', async () => {
   try {
-    const routes = await db.queryAll(`
-      SELECT wr.id, wr.name, wr.description, wr.is_active, wr.created_at,
-             u.full_name as created_by_name,
-             (SELECT COUNT(*) FROM workflow_stages WHERE route_id = wr.id) as stage_count
-      FROM workflow_routes wr
-      LEFT JOIN users u ON wr.created_by = u.id
-      ORDER BY wr.created_at DESC
-    `);
-    return { success: true, routes };
+    const client = db.getClient();
+    
+    const { data: routes, error } = await client
+      .from('workflow_routes')
+      .select(`
+        id, name, description, is_active, created_at,
+        workflow_stages ( id )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    const transformed = routes.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      is_active: r.is_active,
+      created_at: r.created_at,
+      stage_count: r.workflow_stages?.length || 0
+    }));
+
+    return { success: true, routes: transformed };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -371,23 +460,38 @@ ipcMain.handle('workflows:getAll', async () => {
 
 ipcMain.handle('workflows:getById', async (event, id) => {
   try {
-    const route = await db.queryOne(`
-      SELECT wr.id, wr.name, wr.description, wr.is_active, wr.created_at, wr.created_by
-      FROM workflow_routes wr
-      WHERE wr.id = $1
-    `, [id]);
+    const client = db.getClient();
+    
+    const { data: route, error: routeError } = await client
+      .from('workflow_routes')
+      .select('id, name, description, is_active, created_at, created_by')
+      .eq('id', id)
+      .single();
 
-    const stages = await db.queryAll(`
-      SELECT ws.id, ws.route_id, ws.stage_order, ws.name, ws.description,
-             ws.department_id, ws.approver_role,
-             d.name as department_name
-      FROM workflow_stages ws
-      LEFT JOIN departments d ON ws.department_id = d.id
-      WHERE ws.route_id = $1
-      ORDER BY ws.stage_order
-    `, [id]);
+    if (routeError) {
+      return { success: false, message: routeError.message };
+    }
 
-    return { success: true, route: { ...route, stages } };
+    const { data: stages, error: stagesError } = await client
+      .from('workflow_stages')
+      .select(`
+        id, route_id, stage_order, name, description,
+        department_id, approver_role,
+        departments ( name )
+      `)
+      .eq('route_id', id)
+      .order('stage_order');
+
+    if (stagesError) {
+      return { success: false, message: stagesError.message };
+    }
+
+    const transformedStages = stages.map(s => ({
+      ...s,
+      department_name: s.departments?.name || null
+    }));
+
+    return { success: true, route: { ...route, stages: transformedStages } };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -396,22 +500,40 @@ ipcMain.handle('workflows:getById', async (event, id) => {
 ipcMain.handle('workflows:create', async (event, { data, createdBy }) => {
   try {
     const id = uuidv4();
+    const client = db.getClient();
     
-    await db.transaction(async (client) => {
-      // Create route
-      await client.query(`
-        INSERT INTO workflow_routes (id, name, description, created_by)
-        VALUES ($1, $2, $3, $4)
-      `, [id, data.name, data.description, createdBy]);
+    // Create route
+    const { error: routeError } = await client
+      .from('workflow_routes')
+      .insert({
+        id,
+        name: data.name,
+        description: data.description,
+        created_by: createdBy
+      });
 
-      // Create stages
-      for (const stage of data.stages) {
-        await client.query(`
-          INSERT INTO workflow_stages (id, route_id, stage_order, name, description, department_id, approver_role)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [uuidv4(), id, stage.order, stage.name, stage.description, stage.department_id, stage.approver_role]);
-      }
-    });
+    if (routeError) {
+      return { success: false, message: routeError.message };
+    }
+
+    // Create stages
+    const stagesToInsert = data.stages.map(stage => ({
+      id: uuidv4(),
+      route_id: id,
+      stage_order: stage.order,
+      name: stage.name,
+      description: stage.description,
+      department_id: stage.department_id,
+      approver_role: stage.approver_role
+    }));
+
+    const { error: stagesError } = await client
+      .from('workflow_stages')
+      .insert(stagesToInsert);
+
+    if (stagesError) {
+      return { success: false, message: stagesError.message };
+    }
 
     logActivity(createdBy, 'create', 'workflow', id, `Created workflow: ${data.name}`);
     return { success: true, id };
@@ -422,23 +544,43 @@ ipcMain.handle('workflows:create', async (event, { data, createdBy }) => {
 
 ipcMain.handle('workflows:update', async (event, { id, data, updatedBy }) => {
   try {
-    await db.transaction(async (client) => {
-      // Update route
-      await client.query(`
-        UPDATE workflow_routes SET name = $1, description = $2, is_active = $3 WHERE id = $4
-      `, [data.name, data.description, data.is_active, id]);
+    const client = db.getClient();
+    
+    // Update route
+    const { error: routeError } = await client
+      .from('workflow_routes')
+      .update({
+        name: data.name,
+        description: data.description,
+        is_active: data.is_active
+      })
+      .eq('id', id);
 
-      // Delete existing stages
-      await client.query('DELETE FROM workflow_stages WHERE route_id = $1', [id]);
+    if (routeError) {
+      return { success: false, message: routeError.message };
+    }
 
-      // Create new stages
-      for (const stage of data.stages) {
-        await client.query(`
-          INSERT INTO workflow_stages (id, route_id, stage_order, name, description, department_id, approver_role)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [uuidv4(), id, stage.order, stage.name, stage.description, stage.department_id, stage.approver_role]);
-      }
-    });
+    // Delete existing stages
+    await client.from('workflow_stages').delete().eq('route_id', id);
+
+    // Create new stages
+    const stagesToInsert = data.stages.map(stage => ({
+      id: uuidv4(),
+      route_id: id,
+      stage_order: stage.order,
+      name: stage.name,
+      description: stage.description,
+      department_id: stage.department_id,
+      approver_role: stage.approver_role
+    }));
+
+    const { error: stagesError } = await client
+      .from('workflow_stages')
+      .insert(stagesToInsert);
+
+    if (stagesError) {
+      return { success: false, message: stagesError.message };
+    }
 
     logActivity(updatedBy, 'update', 'workflow', id, 'Updated workflow');
     return { success: true };
@@ -449,8 +591,21 @@ ipcMain.handle('workflows:update', async (event, { id, data, updatedBy }) => {
 
 ipcMain.handle('workflows:delete', async (event, { id, deletedBy }) => {
   try {
-    await db.query('DELETE FROM workflow_stages WHERE route_id = $1', [id]);
-    await db.query('DELETE FROM workflow_routes WHERE id = $1', [id]);
+    const client = db.getClient();
+    
+    // Delete stages first
+    await client.from('workflow_stages').delete().eq('route_id', id);
+    
+    // Delete route
+    const { error } = await client
+      .from('workflow_routes')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    
     logActivity(deletedBy, 'delete', 'workflow', id, 'Deleted workflow');
     return { success: true };
   } catch (error) {
@@ -464,44 +619,66 @@ ipcMain.handle('workflows:delete', async (event, { id, deletedBy }) => {
 
 ipcMain.handle('documents:getAll', async (event, filters) => {
   try {
-    let query = `
-      SELECT d.id, d.title, d.description, d.file_name, d.file_type, d.current_stage,
-             d.status, d.priority, d.deadline, d.created_at, d.updated_at,
-             dep.name as department_name,
-             u.full_name as uploader_name,
-             wr.name as workflow_name,
-             (SELECT COUNT(*) FROM workflow_stages WHERE route_id = d.workflow_route_id) as total_stages
-      FROM documents d
-      LEFT JOIN departments dep ON d.department_id = dep.id
-      LEFT JOIN users u ON d.uploaded_by = u.id
-      LEFT JOIN workflow_routes wr ON d.workflow_route_id = wr.id
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramCount = 1;
+    const client = db.getClient();
+    
+    let query = client
+      .from('documents')
+      .select(`
+        id, title, description, file_name, file_type, current_stage,
+        status, priority, deadline, created_at, updated_at,
+        departments ( name ),
+        users!documents_uploaded_by_fkey ( full_name ),
+        workflow_routes ( name )
+      `);
 
     if (filters?.department_id) {
-      query += ` AND d.department_id = $${paramCount++}`;
-      params.push(filters.department_id);
+      query = query.eq('department_id', filters.department_id);
     }
     if (filters?.status) {
-      query += ` AND d.status = $${paramCount++}`;
-      params.push(filters.status);
+      query = query.eq('status', filters.status);
     }
     if (filters?.uploaded_by) {
-      query += ` AND d.uploaded_by = $${paramCount++}`;
-      params.push(filters.uploaded_by);
+      query = query.eq('uploaded_by', filters.uploaded_by);
     }
     if (filters?.search) {
-      query += ` AND (d.title ILIKE $${paramCount} OR d.description ILIKE $${paramCount})`;
-      params.push(`%${filters.search}%`);
-      paramCount++;
+      query = query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
     }
 
-    query += ' ORDER BY d.created_at DESC';
+    query = query.order('created_at', { ascending: false });
 
-    const documents = await db.queryAll(query, params);
-    return { success: true, documents };
+    const { data: documents, error } = await query;
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    // Get stage counts for each document
+    const transformedDocs = await Promise.all(documents.map(async (doc) => {
+      const { count } = await client
+        .from('workflow_stages')
+        .select('id', { count: 'exact', head: true })
+        .eq('route_id', doc.workflow_route_id);
+
+      return {
+        id: doc.id,
+        title: doc.title,
+        description: doc.description,
+        file_name: doc.file_name,
+        file_type: doc.file_type,
+        current_stage: doc.current_stage,
+        status: doc.status,
+        priority: doc.priority,
+        deadline: doc.deadline,
+        created_at: doc.created_at,
+        updated_at: doc.updated_at,
+        department_name: doc.departments?.name || null,
+        uploader_name: doc.users?.full_name || null,
+        workflow_name: doc.workflow_routes?.name || null,
+        total_stages: count || 0
+      };
+    }));
+
+    return { success: true, documents: transformedDocs };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -509,48 +686,79 @@ ipcMain.handle('documents:getAll', async (event, filters) => {
 
 ipcMain.handle('documents:getById', async (event, id) => {
   try {
-    const doc = await db.queryOne(`
-      SELECT d.*, 
-             dep.name as department_name,
-             u.full_name as uploader_name,
-             wr.name as workflow_name
-      FROM documents d
-      LEFT JOIN departments dep ON d.department_id = dep.id
-      LEFT JOIN users u ON d.uploaded_by = u.id
-      LEFT JOIN workflow_routes wr ON d.workflow_route_id = wr.id
-      WHERE d.id = $1
-    `, [id]);
+    const client = db.getClient();
+    
+    const { data: doc, error: docError } = await client
+      .from('documents')
+      .select(`
+        *,
+        departments ( name ),
+        users!documents_uploaded_by_fkey ( full_name ),
+        workflow_routes ( name )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (docError) {
+      return { success: false, message: docError.message };
+    }
 
     if (!doc) {
       return { success: false, message: 'Document not found' };
     }
 
-    const versions = await db.queryAll(`
-      SELECT dv.*, u.full_name as uploader_name
-      FROM document_versions dv
-      LEFT JOIN users u ON dv.uploaded_by = u.id
-      WHERE dv.document_id = $1
-      ORDER BY dv.version_number DESC
-    `, [id]);
+    // Get versions
+    const { data: versions } = await client
+      .from('document_versions')
+      .select(`
+        *,
+        users ( full_name )
+      `)
+      .eq('document_id', id)
+      .order('version_number', { ascending: false });
 
-    const approvals = await db.queryAll(`
-      SELECT da.*, u.full_name as approver_name, ws.name as stage_name
-      FROM document_approvals da
-      LEFT JOIN users u ON da.approver_id = u.id
-      LEFT JOIN workflow_stages ws ON da.stage_id = ws.id
-      WHERE da.document_id = $1
-      ORDER BY da.created_at DESC
-    `, [id]);
+    // Get approvals
+    const { data: approvals } = await client
+      .from('document_approvals')
+      .select(`
+        *,
+        users ( full_name ),
+        workflow_stages ( name )
+      `)
+      .eq('document_id', id)
+      .order('created_at', { ascending: false });
 
-    const stages = await db.queryAll(`
-      SELECT ws.*, d.name as department_name
-      FROM workflow_stages ws
-      LEFT JOIN departments d ON ws.department_id = d.id
-      WHERE ws.route_id = $1
-      ORDER BY ws.stage_order
-    `, [doc.workflow_route_id]);
+    // Get stages
+    const { data: stages } = await client
+      .from('workflow_stages')
+      .select(`
+        *,
+        departments ( name )
+      `)
+      .eq('route_id', doc.workflow_route_id)
+      .order('stage_order');
 
-    return { success: true, document: { ...doc, versions, approvals, workflowStages: stages } };
+    const document = {
+      ...doc,
+      department_name: doc.departments?.name || null,
+      uploader_name: doc.users?.full_name || null,
+      workflow_name: doc.workflow_routes?.name || null,
+      versions: versions?.map(v => ({
+        ...v,
+        uploader_name: v.users?.full_name || null
+      })) || [],
+      approvals: approvals?.map(a => ({
+        ...a,
+        approver_name: a.users?.full_name || null,
+        stage_name: a.workflow_stages?.name || null
+      })) || [],
+      workflowStages: stages?.map(s => ({
+        ...s,
+        department_name: s.departments?.name || null
+      })) || []
+    };
+
+    return { success: true, document };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -559,6 +767,9 @@ ipcMain.handle('documents:getById', async (event, id) => {
 ipcMain.handle('documents:upload', async (event, { data, uploadedBy }) => {
   try {
     const id = uuidv4();
+    const client = db.getClient();
+    
+    // Store file locally (or use Supabase Storage)
     const documentsDir = path.join(app.getPath('userData'), 'documents');
     
     if (!fs.existsSync(documentsDir)) {
@@ -569,12 +780,26 @@ ipcMain.handle('documents:upload', async (event, { data, uploadedBy }) => {
     const filePath = path.join(documentsDir, fileName);
     fs.copyFileSync(data.temp_path, filePath);
 
-    await db.query(`
-      INSERT INTO documents (id, title, description, file_path, file_name, file_type, file_size,
-                             department_id, uploaded_by, workflow_route_id, priority, deadline)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    `, [id, data.title, data.description, filePath, data.file_name, data.file_type, data.file_size,
-        data.department_id, uploadedBy, data.workflow_route_id, data.priority, data.deadline]);
+    const { error } = await client
+      .from('documents')
+      .insert({
+        id,
+        title: data.title,
+        description: data.description,
+        file_path: filePath,
+        file_name: data.file_name,
+        file_type: data.file_type,
+        file_size: data.file_size,
+        department_id: data.department_id,
+        uploaded_by: uploadedBy,
+        workflow_route_id: data.workflow_route_id,
+        priority: data.priority,
+        deadline: data.deadline
+      });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     logActivity(uploadedBy, 'upload', 'document', id, `Uploaded document: ${data.title}`);
     return { success: true, id };
@@ -585,10 +810,22 @@ ipcMain.handle('documents:upload', async (event, { data, uploadedBy }) => {
 
 ipcMain.handle('documents:update', async (event, { id, data, updatedBy }) => {
   try {
-    await db.query(`
-      UPDATE documents SET title = $1, description = $2, priority = $3, deadline = $4, updated_at = NOW()
-      WHERE id = $5
-    `, [data.title, data.description, data.priority, data.deadline, id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('documents')
+      .update({
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        deadline: data.deadline,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     logActivity(updatedBy, 'update', 'document', id, 'Updated document');
     return { success: true };
@@ -599,40 +836,83 @@ ipcMain.handle('documents:update', async (event, { id, data, updatedBy }) => {
 
 ipcMain.handle('documents:approve', async (event, { documentId, stageId, action, comments, approverId }) => {
   try {
-    await db.transaction(async (client) => {
-      // Record approval
-      await client.query(`
-        INSERT INTO document_approvals (id, document_id, stage_id, approver_id, action, comments)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [uuidv4(), documentId, stageId, approverId, action, comments]);
+    const client = db.getClient();
+    
+    // Record approval
+    const approvalId = uuidv4();
+    const { error: approvalError } = await client
+      .from('document_approvals')
+      .insert({
+        id: approvalId,
+        document_id: documentId,
+        stage_id: stageId,
+        approver_id: approverId,
+        action,
+        comments
+      });
 
-      // Get current stage and total stages
-      const doc = await client.queryOne('SELECT current_stage, workflow_route_id FROM documents WHERE id = $1', [documentId]);
-      const totalStages = await client.queryOne('SELECT COUNT(*) as count FROM workflow_stages WHERE route_id = $1', [doc.workflow_route_id]);
+    if (approvalError) {
+      return { success: false, message: approvalError.message };
+    }
 
-      let newStatus = 'in_review';
-      let newStage = doc.current_stage;
+    // Get current document
+    const { data: doc } = await client
+      .from('documents')
+      .select('current_stage, workflow_route_id')
+      .eq('id', documentId)
+      .single();
 
-      if (action === 'approved') {
-        newStage = doc.current_stage + 1;
-        if (newStage >= totalStages.count) {
-          newStatus = 'approved';
-        }
-      } else if (action === 'rejected') {
-        newStatus = 'rejected';
+    // Get total stages
+    const { count } = await client
+      .from('workflow_stages')
+      .select('id', { count: 'exact', head: true })
+      .eq('route_id', doc.workflow_route_id);
+
+    let newStatus = 'in_review';
+    let newStage = doc.current_stage;
+
+    if (action === 'approved') {
+      newStage = doc.current_stage + 1;
+      if (newStage >= count) {
+        newStatus = 'approved';
       }
+    } else if (action === 'rejected') {
+      newStatus = 'rejected';
+    }
 
-      // Update document
-      await client.query(`
-        UPDATE documents SET current_stage = $1, status = $2, updated_at = NOW() WHERE id = $3
-      `, [newStage, newStatus, documentId]);
-    });
+    // Update document
+    const { error: updateError } = await client
+      .from('documents')
+      .update({
+        current_stage: newStage,
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', documentId);
+
+    if (updateError) {
+      return { success: false, message: updateError.message };
+    }
 
     logActivity(approverId, action, 'document', documentId, comments || `Document ${action}`);
     
-    const uploader = await db.queryOne('SELECT uploaded_by FROM documents WHERE id = $1', [documentId]);
-    createNotification(uploader.uploaded_by, action, `Document ${action}`, 
-                      `Your document has been ${action}. ${comments || ''}`, 'document', documentId);
+    // Get uploader and send notification
+    const { data: uploader } = await client
+      .from('documents')
+      .select('uploaded_by')
+      .eq('id', documentId)
+      .single();
+
+    if (uploader) {
+      createNotification(
+        uploader.uploaded_by,
+        action,
+        `Document ${action}`,
+        `Your document has been ${action}. ${comments || ''}`,
+        'document',
+        documentId
+      );
+    }
 
     return { success: true };
   } catch (error) {
@@ -642,7 +922,17 @@ ipcMain.handle('documents:approve', async (event, { documentId, stageId, action,
 
 ipcMain.handle('documents:delete', async (event, { id, deletedBy }) => {
   try {
-    await db.query('UPDATE documents SET status = $1 WHERE id = $2', ['archived', id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('documents')
+      .update({ status: 'archived' })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    
     logActivity(deletedBy, 'delete', 'document', id, 'Archived document');
     return { success: true };
   } catch (error) {
@@ -656,48 +946,59 @@ ipcMain.handle('documents:delete', async (event, { id, deletedBy }) => {
 
 ipcMain.handle('tasks:getAll', async (event, filters) => {
   try {
-    let query = `
-      SELECT t.id, t.title, t.description, t.status, t.priority, t.deadline, t.created_at, t.completed_at,
-             d.title as document_title,
-             u1.full_name as assigned_by_name,
-             u2.full_name as assigned_to_name,
-             dep.name as department_name
-      FROM tasks t
-      LEFT JOIN documents d ON t.document_id = d.id
-      LEFT JOIN users u1 ON t.assigned_by = u1.id
-      LEFT JOIN users u2 ON t.assigned_to = u2.id
-      LEFT JOIN departments dep ON t.department_id = dep.id
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramCount = 1;
+    const client = db.getClient();
+    
+    let query = client
+      .from('tasks')
+      .select(`
+        id, title, description, status, priority, deadline, created_at, completed_at,
+        documents ( title ),
+        users!tasks_assigned_by_fkey ( full_name ),
+        users!tasks_assigned_to_fkey ( full_name ),
+        departments ( name )
+      `);
 
     if (filters?.assigned_to) {
-      query += ` AND t.assigned_to = $${paramCount++}`;
-      params.push(filters.assigned_to);
+      query = query.eq('assigned_to', filters.assigned_to);
     }
     if (filters?.assigned_by) {
-      query += ` AND t.assigned_by = $${paramCount++}`;
-      params.push(filters.assigned_by);
+      query = query.eq('assigned_by', filters.assigned_by);
     }
     if (filters?.department_id) {
-      query += ` AND t.department_id = $${paramCount++}`;
-      params.push(filters.department_id);
+      query = query.eq('department_id', filters.department_id);
     }
     if (filters?.status) {
-      query += ` AND t.status = $${paramCount++}`;
-      params.push(filters.status);
+      query = query.eq('status', filters.status);
     }
     if (filters?.search) {
-      query += ` AND (t.title ILIKE $${paramCount} OR t.description ILIKE $${paramCount})`;
-      params.push(`%${filters.search}%`);
-      paramCount++;
+      query = query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
     }
 
-    query += ' ORDER BY t.created_at DESC';
+    query = query.order('created_at', { ascending: false });
 
-    const tasks = await db.queryAll(query, params);
-    return { success: true, tasks };
+    const { data: tasks, error } = await query;
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    // Transform results
+    const transformedTasks = tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      status: t.status,
+      priority: t.priority,
+      deadline: t.deadline,
+      created_at: t.created_at,
+      completed_at: t.completed_at,
+      document_title: t.documents?.title || null,
+      assigned_by_name: t.users?.[0]?.full_name || null,
+      assigned_to_name: t.users?.[1]?.full_name || null,
+      department_name: t.departments?.name || null
+    }));
+
+    return { success: true, tasks: transformedTasks };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -705,25 +1006,37 @@ ipcMain.handle('tasks:getAll', async (event, filters) => {
 
 ipcMain.handle('tasks:getById', async (event, id) => {
   try {
-    const task = await db.queryOne(`
-      SELECT t.*, 
-             d.title as document_title,
-             u1.full_name as assigned_by_name,
-             u2.full_name as assigned_to_name,
-             dep.name as department_name
-      FROM tasks t
-      LEFT JOIN documents d ON t.document_id = d.id
-      LEFT JOIN users u1 ON t.assigned_by = u1.id
-      LEFT JOIN users u2 ON t.assigned_to = u2.id
-      LEFT JOIN departments dep ON t.department_id = dep.id
-      WHERE t.id = $1
-    `, [id]);
+    const client = db.getClient();
+    
+    const { data: task, error } = await client
+      .from('tasks')
+      .select(`
+        *,
+        documents ( title ),
+        users!tasks_assigned_by_fkey ( full_name ),
+        users!tasks_assigned_to_fkey ( full_name ),
+        departments ( name )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     if (!task) {
       return { success: false, message: 'Task not found' };
     }
 
-    return { success: true, task };
+    const transformedTask = {
+      ...task,
+      document_title: task.documents?.title || null,
+      assigned_by_name: task.users?.[0]?.full_name || null,
+      assigned_to_name: task.users?.[1]?.full_name || null,
+      department_name: task.departments?.name || null
+    };
+
+    return { success: true, task: transformedTask };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -732,15 +1045,35 @@ ipcMain.handle('tasks:getById', async (event, id) => {
 ipcMain.handle('tasks:create', async (event, { data, createdBy }) => {
   try {
     const id = uuidv4();
-    await db.query(`
-      INSERT INTO tasks (id, title, description, document_id, assigned_by, assigned_to, department_id, priority, deadline)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    `, [id, data.title, data.description, data.document_id, createdBy, data.assigned_to, 
-        data.department_id, data.priority, data.deadline]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('tasks')
+      .insert({
+        id,
+        title: data.title,
+        description: data.description,
+        document_id: data.document_id,
+        assigned_by: createdBy,
+        assigned_to: data.assigned_to,
+        department_id: data.department_id,
+        priority: data.priority,
+        deadline: data.deadline
+      });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     logActivity(createdBy, 'create', 'task', id, `Created task: ${data.title}`);
-    createNotification(data.assigned_to, 'task_assigned', 'New Task Assigned',
-                      `You have been assigned a new task: ${data.title}`, 'task', id);
+    createNotification(
+      data.assigned_to,
+      'task_assigned',
+      'New Task Assigned',
+      `You have been assigned a new task: ${data.title}`,
+      'task',
+      id
+    );
 
     return { success: true, id };
   } catch (error) {
@@ -750,10 +1083,22 @@ ipcMain.handle('tasks:create', async (event, { data, createdBy }) => {
 
 ipcMain.handle('tasks:update', async (event, { id, data, updatedBy }) => {
   try {
-    await db.query(`
-      UPDATE tasks SET title = $1, description = $2, priority = $3, deadline = $4, updated_at = NOW()
-      WHERE id = $5
-    `, [data.title, data.description, data.priority, data.deadline, id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('tasks')
+      .update({
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        deadline: data.deadline,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     logActivity(updatedBy, 'update', 'task', id, 'Updated task');
     return { success: true };
@@ -764,17 +1109,41 @@ ipcMain.handle('tasks:update', async (event, { id, data, updatedBy }) => {
 
 ipcMain.handle('tasks:updateStatus', async (event, { id, status, updatedBy }) => {
   try {
+    const client = db.getClient();
+    
     const completedAt = status === 'completed' ? new Date().toISOString() : null;
-    await db.query(`
-      UPDATE tasks SET status = $1, completed_at = $2, updated_at = NOW() WHERE id = $3
-    `, [status, completedAt, id]);
+    
+    const { error } = await client
+      .from('tasks')
+      .update({
+        status,
+        completed_at: completedAt,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     logActivity(updatedBy, 'status_change', 'task', id, `Task status changed to ${status}`);
     
-    const task = await db.queryOne('SELECT assigned_by, title FROM tasks WHERE id = $1', [id]);
+    // Get task details and notify creator
+    const { data: task } = await client
+      .from('tasks')
+      .select('assigned_by, title')
+      .eq('id', id)
+      .single();
+
     if (task && status === 'completed') {
-      createNotification(task.assigned_by, 'task_completed', 'Task Completed',
-                        `Task "${task.title}" has been completed`, 'task', id);
+      createNotification(
+        task.assigned_by,
+        'task_completed',
+        'Task Completed',
+        `Task "${task.title}" has been completed`,
+        'task',
+        id
+      );
     }
 
     return { success: true };
@@ -785,7 +1154,17 @@ ipcMain.handle('tasks:updateStatus', async (event, { id, status, updatedBy }) =>
 
 ipcMain.handle('tasks:delete', async (event, { id, deletedBy }) => {
   try {
-    await db.query('DELETE FROM tasks WHERE id = $1', [id]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('tasks')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    
     logActivity(deletedBy, 'delete', 'task', id, 'Deleted task');
     return { success: true };
   } catch (error) {
@@ -799,14 +1178,28 @@ ipcMain.handle('tasks:delete', async (event, { id, deletedBy }) => {
 
 ipcMain.handle('messages:getByTask', async (event, taskId) => {
   try {
-    const messages = await db.queryAll(`
-      SELECT cm.*, u.full_name as sender_name, u.role as sender_role
-      FROM chat_messages cm
-      LEFT JOIN users u ON cm.sender_id = u.id
-      WHERE cm.task_id = $1
-      ORDER BY cm.created_at ASC
-    `, [taskId]);
-    return { success: true, messages };
+    const client = db.getClient();
+    
+    const { data: messages, error } = await client
+      .from('chat_messages')
+      .select(`
+        *,
+        users ( full_name, role )
+      `)
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    const transformed = messages.map(m => ({
+      ...m,
+      sender_name: m.users?.full_name || null,
+      sender_role: m.users?.role || null
+    }));
+
+    return { success: true, messages: transformed };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -814,14 +1207,28 @@ ipcMain.handle('messages:getByTask', async (event, taskId) => {
 
 ipcMain.handle('messages:getByDocument', async (event, documentId) => {
   try {
-    const messages = await db.queryAll(`
-      SELECT cm.*, u.full_name as sender_name, u.role as sender_role
-      FROM chat_messages cm
-      LEFT JOIN users u ON cm.sender_id = u.id
-      WHERE cm.document_id = $1
-      ORDER BY cm.created_at ASC
-    `, [documentId]);
-    return { success: true, messages };
+    const client = db.getClient();
+    
+    const { data: messages, error } = await client
+      .from('chat_messages')
+      .select(`
+        *,
+        users ( full_name, role )
+      `)
+      .eq('document_id', documentId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    const transformed = messages.map(m => ({
+      ...m,
+      sender_name: m.users?.full_name || null,
+      sender_role: m.users?.role || null
+    }));
+
+    return { success: true, messages: transformed };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -830,14 +1237,32 @@ ipcMain.handle('messages:getByDocument', async (event, documentId) => {
 ipcMain.handle('messages:send', async (event, { data, senderId }) => {
   try {
     const id = uuidv4();
-    await db.query(`
-      INSERT INTO chat_messages (id, task_id, document_id, sender_id, receiver_id, message)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [id, data.task_id, data.document_id, senderId, data.receiver_id, data.message]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('chat_messages')
+      .insert({
+        id,
+        task_id: data.task_id,
+        document_id: data.document_id,
+        sender_id: senderId,
+        receiver_id: data.receiver_id,
+        message: data.message
+      });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
 
     if (data.receiver_id) {
-      createNotification(data.receiver_id, 'new_message', 'New Message',
-                        `You have a new message`, 'message', id);
+      createNotification(
+        data.receiver_id,
+        'new_message',
+        'New Message',
+        'You have a new message',
+        'message',
+        id
+      );
     }
 
     return { success: true, id };
@@ -848,7 +1273,17 @@ ipcMain.handle('messages:send', async (event, { data, senderId }) => {
 
 ipcMain.handle('messages:markAsRead', async (event, messageId) => {
   try {
-    await db.query('UPDATE chat_messages SET is_read = TRUE WHERE id = $1', [messageId]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('chat_messages')
+      .update({ is_read: true })
+      .eq('id', messageId);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, message: error.message };
@@ -861,9 +1296,19 @@ ipcMain.handle('messages:markAsRead', async (event, messageId) => {
 
 ipcMain.handle('notifications:getAll', async (event, userId) => {
   try {
-    const notifications = await db.queryAll(`
-      SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50
-    `, [userId]);
+    const client = db.getClient();
+    
+    const { data: notifications, error } = await client
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
     return { success: true, notifications };
   } catch (error) {
     return { success: false, message: error.message };
@@ -872,7 +1317,17 @@ ipcMain.handle('notifications:getAll', async (event, userId) => {
 
 ipcMain.handle('notifications:markAsRead', async (event, notificationId) => {
   try {
-    await db.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [notificationId]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notificationId);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, message: error.message };
@@ -881,7 +1336,17 @@ ipcMain.handle('notifications:markAsRead', async (event, notificationId) => {
 
 ipcMain.handle('notifications:markAllAsRead', async (event, userId) => {
   try {
-    await db.query('UPDATE notifications SET is_read = TRUE WHERE user_id = $1', [userId]);
+    const client = db.getClient();
+    
+    const { error } = await client
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, message: error.message };
@@ -894,32 +1359,39 @@ ipcMain.handle('notifications:markAllAsRead', async (event, userId) => {
 
 ipcMain.handle('logs:getAll', async (event, filters) => {
   try {
-    let query = `
-      SELECT al.*, u.full_name as user_name
-      FROM activity_logs al
-      LEFT JOIN users u ON al.user_id = u.id
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramCount = 1;
+    const client = db.getClient();
+    
+    let query = client
+      .from('activity_logs')
+      .select(`
+        *,
+        users ( full_name )
+      `);
 
     if (filters?.user_id) {
-      query += ` AND al.user_id = $${paramCount++}`;
-      params.push(filters.user_id);
+      query = query.eq('user_id', filters.user_id);
     }
     if (filters?.entity_type) {
-      query += ` AND al.entity_type = $${paramCount++}`;
-      params.push(filters.entity_type);
+      query = query.eq('entity_type', filters.entity_type);
     }
     if (filters?.action) {
-      query += ` AND al.action = $${paramCount++}`;
-      params.push(filters.action);
+      query = query.eq('action', filters.action);
     }
 
-    query += ' ORDER BY al.created_at DESC LIMIT 100';
+    query = query.order('created_at', { ascending: false }).limit(100);
 
-    const logs = await db.queryAll(query, params);
-    return { success: true, logs };
+    const { data: logs, error } = await query;
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    const transformed = logs.map(l => ({
+      ...l,
+      user_name: l.users?.full_name || null
+    }));
+
+    return { success: true, logs: transformed };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -931,30 +1403,55 @@ ipcMain.handle('logs:getAll', async (event, filters) => {
 
 ipcMain.handle('dashboard:getStats', async (event, userId, role) => {
   try {
+    const client = db.getClient();
     let stats = {};
 
     if (role === 'admin') {
-      stats.users = await db.queryOne('SELECT COUNT(*) as count FROM users WHERE is_active = TRUE');
-      stats.departments = await db.queryOne('SELECT COUNT(*) as count FROM departments');
-      stats.documents = await db.queryOne('SELECT COUNT(*) as count FROM documents WHERE status != $1', ['archived']);
-      stats.tasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks');
-      stats.pendingApprovals = await db.queryOne('SELECT COUNT(*) as count FROM documents WHERE status = $1', ['pending']);
+      const [users, departments, documents, tasks, pendingApprovals] = await Promise.all([
+        client.from('users').select('id', { count: 'exact', head: true }).eq('is_active', true),
+        client.from('departments').select('id', { count: 'exact', head: true }),
+        client.from('documents').select('id', { count: 'exact', head: true }).neq('status', 'archived'),
+        client.from('tasks').select('id', { count: 'exact', head: true }),
+        client.from('documents').select('id', { count: 'exact', head: true }).eq('status', 'pending')
+      ]);
+
+      stats.users = { count: users.count };
+      stats.departments = { count: departments.count };
+      stats.documents = { count: documents.count };
+      stats.tasks = { count: tasks.count };
+      stats.pendingApprovals = { count: pendingApprovals.count };
     } else if (role === 'hr') {
-      stats.totalTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_by = $1', [userId]);
-      stats.pendingTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_by = $1 AND status = $2', [userId, 'pending']);
-      stats.completedTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_by = $1 AND status = $2', [userId, 'completed']);
+      const [totalTasks, pendingTasks, completedTasks] = await Promise.all([
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_by', userId),
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_by', userId).eq('status', 'pending'),
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_by', userId).eq('status', 'completed')
+      ]);
+
+      stats.totalTasks = { count: totalTasks.count };
+      stats.pendingTasks = { count: pendingTasks.count };
+      stats.completedTasks = { count: completedTasks.count };
     } else if (role === 'head') {
-      stats.pendingApprovals = await db.queryOne('SELECT COUNT(*) as count FROM documents WHERE status = $1', ['in_review']);
-      stats.approvedThisMonth = await db.queryOne(
-        'SELECT COUNT(*) as count FROM document_approvals WHERE approver_id = $1 AND action = $2',
-        [userId, 'approved']
-      );
+      const [pendingApprovals, approvedThisMonth] = await Promise.all([
+        client.from('documents').select('id', { count: 'exact', head: true }).eq('status', 'in_review'),
+        client.from('document_approvals').select('id', { count: 'exact', head: true }).eq('approver_id', userId).eq('action', 'approved')
+      ]);
+
+      stats.pendingApprovals = { count: pendingApprovals.count };
+      stats.approvedThisMonth = { count: approvedThisMonth.count };
     } else if (role === 'staff') {
-      stats.assignedTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_to = $1', [userId]);
-      stats.pendingTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_to = $1 AND status = $2', [userId, 'pending']);
-      stats.inProgressTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_to = $1 AND status = $2', [userId, 'in_progress']);
-      stats.completedTasks = await db.queryOne('SELECT COUNT(*) as count FROM tasks WHERE assigned_to = $1 AND status = $2', [userId, 'completed']);
-      stats.documents = await db.queryOne('SELECT COUNT(*) as count FROM documents WHERE uploaded_by = $1', [userId]);
+      const [assignedTasks, pendingTasks, inProgressTasks, completedTasks, documents] = await Promise.all([
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_to', userId),
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_to', userId).eq('status', 'pending'),
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_to', userId).eq('status', 'in_progress'),
+        client.from('tasks').select('id', { count: 'exact', head: true }).eq('assigned_to', userId).eq('status', 'completed'),
+        client.from('documents').select('id', { count: 'exact', head: true }).eq('uploaded_by', userId)
+      ]);
+
+      stats.assignedTasks = { count: assignedTasks.count };
+      stats.pendingTasks = { count: pendingTasks.count };
+      stats.inProgressTasks = { count: inProgressTasks.count };
+      stats.completedTasks = { count: completedTasks.count };
+      stats.documents = { count: documents.count };
     }
 
     return { success: true, stats };
@@ -983,20 +1480,39 @@ ipcMain.handle('dialog:openFile', async () => {
 
 function logActivity(userId, action, entityType, entityId, details) {
   const id = uuidv4();
-  db.query(`
-    INSERT INTO activity_logs (id, user_id, action, entity_type, entity_id, details)
-    VALUES ($1, $2, $3, $4, $5, $6)
-  `, [id, userId, action, entityType, entityId, details]).catch(err => {
-    console.error('Error logging activity:', err);
-  });
+  const client = db.getClient();
+  
+  client
+    .from('activity_logs')
+    .insert({
+      id,
+      user_id: userId,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details
+    })
+    .catch(err => {
+      console.error('Error logging activity:', err);
+    });
 }
 
 function createNotification(userId, type, title, message, entityType, entityId) {
   const id = uuidv4();
-  db.query(`
-    INSERT INTO notifications (id, user_id, type, title, message, entity_type, entity_id)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
-  `, [id, userId, type, title, message, entityType, entityId]).catch(err => {
-    console.error('Error creating notification:', err);
-  });
+  const client = db.getClient();
+  
+  client
+    .from('notifications')
+    .insert({
+      id,
+      user_id: userId,
+      type,
+      title,
+      message,
+      entity_type: entityType,
+      entity_id: entityId
+    })
+    .catch(err => {
+      console.error('Error creating notification:', err);
+    });
 }
